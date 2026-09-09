@@ -12,3 +12,12 @@
  */
 export const RESTAURANT_COLUMNS =
   'id, name, cuisine, address, rating, created_at AS "createdAt"';
+
+/**
+ * `visits` is inconsistent with itself: `restaurantId` and `amountSpent` were
+ * created quoted, so they're already camelCase, but `created_at` wasn't. Only
+ * the timestamp needs aliasing - the same trap as `restaurants`, in a table
+ * where most columns don't need it.
+ */
+export const VISIT_COLUMNS =
+  'id, "restaurantId", date, "amountSpent", notes, created_at AS "createdAt"';

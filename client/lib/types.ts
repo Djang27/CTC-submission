@@ -95,3 +95,38 @@ export function toVisit(row: Record<string, unknown>): Visit {
     createdAt: isoTimestamp(row.createdAt),
   };
 }
+
+// --- spending summary --------------------------------------------------------
+
+/** What one restaurant has cost, across all its visits. */
+export interface RestaurantSpending {
+  restaurantId: number;
+  name: string;
+  visitCount: number;
+  totalSpent: number;
+  /** Calendar date of the most recent visit, or null if never visited. */
+  lastVisit: string | null;
+}
+
+/** The whole picture: per-restaurant rows plus the totals across all of them. */
+export interface SpendingSummary {
+  totalSpent: number;
+  visitCount: number;
+  restaurants: RestaurantSpending[];
+}
+
+/** Convert an aggregate row from the spending query into the shape above. */
+export function toRestaurantSpending(
+  row: Record<string, unknown>
+): RestaurantSpending {
+  return {
+    restaurantId: Number(row.restaurantId),
+    name: String(row.name),
+    visitCount: Number(row.visitCount),
+    // SUM over NUMERIC is NUMERIC, so this arrives as a string like the rest.
+    totalSpent: num(row.totalSpent) ?? 0,
+    // MAX(date) is null for a restaurant with no visits - dateOnly would turn
+    // that into the string "null".
+    lastVisit: row.lastVisit == null ? null : dateOnly(row.lastVisit),
+  };
+}

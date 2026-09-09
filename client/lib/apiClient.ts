@@ -8,7 +8,7 @@
  * The shapes these helpers return live in `lib/types.ts`, shared with the
  * handlers that produce them.
  */
-import type { Restaurant } from './types';
+import type { Restaurant, SpendingSummary, Visit } from './types';
 
 // We read a base URL from the environment because Server Components fetch on
 // the server, where relative URLs don't resolve - so we need an absolute origin.
@@ -19,12 +19,14 @@ export const API_URL =
 /**
  * Fetch every restaurant from the API.
  *
- * NOTE: this is a bare fetch with no error handling. It does not check the
- * response status and it does not catch network failures - callers get whatever
- * `res.json()` produces, including on a 500.
+ * The status check matters more than it looks: without it a 500 returns the
+ * error object `{ error: ... }`, the page calls `.map()` on it, and the user
+ * sees "restaurants.map is not a function" instead of anything about the
+ * actual failure. That's how the A1 bug presented itself.
  */
 export async function getRestaurants(): Promise<Restaurant[]> {
   const res = await fetch(`${API_URL}/api/restaurants`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load restaurants (${res.status})`);
   return res.json();
 }
 
@@ -33,5 +35,28 @@ export async function getRestaurants(): Promise<Restaurant[]> {
  */
 export async function getRestaurant(id: number | string): Promise<Restaurant> {
   const res = await fetch(`${API_URL}/api/restaurants/${id}`, { cache: 'no-store' });
+  return res.json();
+}
+
+/**
+ * Fetch one restaurant's visits, newest first.
+ *
+ * Unlike the two helpers above this one checks the status: a 404 here is a real
+ * answer (the restaurant is gone), and returning `res.json()` blindly would
+ * hand the page an error object to render as a list - which is exactly how the
+ * A1 bug reached the UI.
+ */
+export async function getVisits(id: number | string): Promise<Visit[]> {
+  const res = await fetch(`${API_URL}/api/restaurants/${id}/visits`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Failed to load visits (${res.status})`);
+  return res.json();
+}
+
+/** Fetch the spending summary: per-restaurant totals plus the overall figure. */
+export async function getSpending(): Promise<SpendingSummary> {
+  const res = await fetch(`${API_URL}/api/spending`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load spending (${res.status})`);
   return res.json();
 }
