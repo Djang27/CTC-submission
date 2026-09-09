@@ -3,6 +3,8 @@ import { pool } from '@/db/pool';
 import { handleError } from '@/lib/errors';
 import { toRestaurant } from '@/lib/types';
 import { RESTAURANT_COLUMNS } from '@/lib/sql';
+import { parseId, parseRestaurantInput } from '@/lib/validation';
+import { NotFoundError } from '@/lib/errors';
 
 type Params = { params: { id: string } };
 
@@ -12,16 +14,16 @@ type Params = { params: { id: string } };
  */
 export async function GET(_req: Request, { params }: Params) {
   try {
+    const id = parseId(params.id);
+
     const { rows } = await pool.query(
       `SELECT ${RESTAURANT_COLUMNS}
          FROM restaurants
         WHERE id = $1`,
-      [params.id]
+      [id]
     );
 
-    if (rows.length === 0) {
-      return NextResponse.json({ error: 'Restaurant not found' }, { status: 404 });
-    }
+    if (rows.length === 0) throw new NotFoundError();
 
     return NextResponse.json(toRestaurant(rows[0]));
   } catch (err) {
@@ -38,24 +40,23 @@ export async function GET(_req: Request, { params }: Params) {
  * is what PUT means in HTTP - a partial merge would be PATCH, which this API
  * doesn't expose.
  *
- * TODO (A3): validate the body the same way POST does, and answer 404 rather
- * than 500 when :id isn't a positive integer.
  */
 export async function PUT(req: Request, { params }: Params) {
   try {
-    const { name, cuisine, address, rating } = await req.json();
+    const id = parseId(params.id);
+    const { name, cuisine, address, rating } = parseRestaurantInput(
+      await req.json()
+    );
 
     const { rows } = await pool.query(
       `UPDATE restaurants
           SET name = $1, cuisine = $2, address = $3, rating = $4
         WHERE id = $5
         RETURNING ${RESTAURANT_COLUMNS}`,
-      [name, cuisine ?? null, address ?? null, rating ?? null, params.id]
+      [name, cuisine, address, rating, id]
     );
 
-    if (rows.length === 0) {
-      return NextResponse.json({ error: 'Restaurant not found' }, { status: 404 });
-    }
+    if (rows.length === 0) throw new NotFoundError();
 
     return NextResponse.json(toRestaurant(rows[0]));
   } catch (err) {
@@ -73,18 +74,17 @@ export async function PUT(req: Request, { params }: Params) {
  * alternative (RESTRICT) would leave rows undeletable with no UI to clear them.
  * It does mean the endpoint destroys more than its name suggests - see WriteUp.
  *
- * TODO (A3): answer 404 rather than 500 when :id isn't a positive integer.
  */
 export async function DELETE(_req: Request, { params }: Params) {
   try {
+    const id = parseId(params.id);
+
     const { rowCount } = await pool.query(
       'DELETE FROM restaurants WHERE id = $1',
-      [params.id]
+      [id]
     );
 
-    if (rowCount === 0) {
-      return NextResponse.json({ error: 'Restaurant not found' }, { status: 404 });
-    }
+    if (rowCount === 0) throw new NotFoundError();
 
     // 204 means "no content" - it must not carry a body, so this can't use
     // NextResponse.json().
