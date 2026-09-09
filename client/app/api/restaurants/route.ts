@@ -9,8 +9,19 @@ import { toRestaurant } from '@/lib/types';
  */
 export async function GET() {
   try {
+    // Columns are snake_case in the migration (001_create_tables.sql), but the
+    // API contract is camelCase. Alias `created_at` so the row keys match what
+    // toRestaurant() reads; unquoted `createdAt` would fold to `createdat` and
+    // error, and a bare `SELECT *` would yield `created_at` and map to
+    // "undefined".
+    //
+    // `id DESC` is a tiebreaker: the seed inserts every row in one transaction,
+    // so `now()` gives them all an identical created_at and the sort would
+    // otherwise be non-deterministic.
     const { rows } = await pool.query(
-      'SELECT * FROM restaurants ORDER BY createdAt DESC'
+      `SELECT id, name, cuisine, address, rating, created_at AS "createdAt"
+         FROM restaurants
+        ORDER BY created_at DESC, id DESC`
     );
     // Map every row - raw rows don't match the contract (NUMERIC comes back
     // as a string, timestamps as Date objects). See lib/types.ts.

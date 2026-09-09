@@ -12,7 +12,9 @@ type Params = { params: { id: string } };
 export async function GET(_req: Request, { params }: Params) {
   try {
     const { rows } = await pool.query(
-      'SELECT * FROM restaurants WHERE id = $1',
+      `SELECT id, name, cuisine, address, rating, created_at AS "createdAt"
+         FROM restaurants
+        WHERE id = $1`,
       [params.id]
     );
 
