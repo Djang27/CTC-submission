@@ -33,12 +33,15 @@ export interface RestaurantInput {
  * a syntactically fine integer that overflows int4, and left alone it reaches
  * Postgres and raises 22003 instead of answering the question the caller asked,
  * which is "is there a restaurant here?" There isn't.
+ *
+ * `notFound` names the thing that's missing: /api/visits/abc is a missing
+ * visit, not a missing restaurant.
  */
-export function parseId(raw: string): number {
-  if (!/^\d+$/.test(raw)) throw new NotFoundError();
+export function parseId(raw: string, notFound = 'Restaurant not found'): number {
+  if (!/^\d+$/.test(raw)) throw new NotFoundError(notFound);
 
   const id = Number(raw);
-  if (id < 1 || id > MAX_INT4) throw new NotFoundError();
+  if (id < 1 || id > MAX_INT4) throw new NotFoundError(notFound);
 
   return id;
 }
@@ -124,4 +127,119 @@ function optionalText(
   }
 
   return trimmed;
+}
+
+// --- visits -----------------------------------------------------------------
+
+/** `amountSpent` is NUMERIC(10, 2): ten digits total, two of them decimal. */
+const MAX_AMOUNT = 99999999.99;
+
+/** Notes are free text and can reasonably run longer than a cuisine name. */
+const MAX_NOTES = 1000;
+
+export interface VisitInput {
+  date: string;
+  amountSpent: number | null;
+  notes: string | null;
+}
+
+/**
+ * Validate a visit body. `restaurantId` is deliberately not read from here -
+ * it comes from the path, so a body can't disagree with the URL it was sent to.
+ */
+export function parseVisitInput(body: unknown): VisitInput {
+  if (!isPlainObject(body)) {
+    throw new ValidationError('Request body must be a JSON object');
+  }
+
+  const details: string[] = [];
+
+  const date = parseVisitDate(body.date, details);
+  const amountSpent = parseAmount(body.amountSpent, details);
+
+  let notes: string | null = null;
+  const rawNotes = body.notes;
+  if (rawNotes !== undefined && rawNotes !== null) {
+    if (typeof rawNotes !== 'string') {
+      details.push('notes must be a string');
+    } else if (rawNotes.trim().length > MAX_NOTES) {
+      details.push(`notes must be ${MAX_NOTES} characters or fewer`);
+    } else {
+      notes = rawNotes.trim() || null;
+    }
+  }
+
+  if (details.length > 0) {
+    throw new ValidationError('Invalid request body', details);
+  }
+
+  return { date, amountSpent, notes };
+}
+
+/**
+ * Required calendar date, "YYYY-MM-DD".
+ *
+ * Checked by round-tripping through Date rather than by regex alone: the shape
+ * check passes "2026-02-31", which is not a day. Rebuilding the string from the
+ * parsed date catches anything Postgres would reject - and rejects it here,
+ * with a message, instead of as a translated driver error.
+ *
+ * Future dates are refused. This logs money already spent; a visit that hasn't
+ * happened has no amount, and allowing it would quietly corrupt the totals.
+ */
+function parseVisitDate(value: unknown, details: string[]): string {
+  if (value === undefined || value === null || value === '') {
+    details.push('date is required');
+    return '';
+  }
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    details.push('date must be a string in YYYY-MM-DD format');
+    return '';
+  }
+
+  // Parse as UTC so the comparison below doesn't shift by the server's offset.
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    details.push('date must be a real calendar date');
+    return '';
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (value > today) {
+    details.push('date must not be in the future');
+    return '';
+  }
+
+  return value;
+}
+
+/** Optional money amount: non-negative, at most two decimals, fits NUMERIC(10,2). */
+function parseAmount(value: unknown, details: string[]): number | null {
+  if (value === undefined || value === null) return null;
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    details.push('amountSpent must be a number');
+    return null;
+  }
+  if (value < 0) {
+    details.push('amountSpent must not be negative');
+    return null;
+  }
+  if (value > MAX_AMOUNT) {
+    details.push(`amountSpent must be ${MAX_AMOUNT} or less`);
+    return null;
+  }
+  // Postgres would round a third decimal away silently. Rejecting it means the
+  // caller is told the stored value wouldn't match what they sent.
+  //
+  // Compared with a tolerance, not for equality: 19.99 * 100 is
+  // 1998.9999999999998 in binary floating point, so an exact check rejects
+  // amounts that are perfectly valid. The epsilon is far smaller than the
+  // 0.005 gap that a real third decimal would produce.
+  if (Math.abs(value * 100 - Math.round(value * 100)) > 1e-9) {
+    details.push('amountSpent must have at most 2 decimal places');
+    return null;
+  }
+
+  return value;
 }
