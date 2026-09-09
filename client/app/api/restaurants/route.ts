@@ -3,6 +3,7 @@ import { pool } from '@/db/pool';
 import { handleError } from '@/lib/errors';
 import { toRestaurant } from '@/lib/types';
 import { RESTAURANT_COLUMNS } from '@/lib/sql';
+import { parseRestaurantInput } from '@/lib/validation';
 
 /**
  * GET /api/restaurants
@@ -28,20 +29,22 @@ export async function GET() {
 
 /**
  * POST /api/restaurants
- * Create a new restaurant. Returns the created record with 201.
- *
- * TODO (A3): validate before inserting. `rating` still accepts 6, and a missing
- * `name` currently reaches the NOT NULL constraint and surfaces as a 500.
+ * Create a new restaurant. Returns the created record with 201, or 400 if the
+ * body is malformed or fails validation.
  */
 export async function POST(req: Request) {
   try {
-    const { name, cuisine, address, rating } = await req.json();
+    // Validate first: a rejected body never reaches the database, so a bad
+    // request fails as a 400 we wrote rather than a constraint we translated.
+    const { name, cuisine, address, rating } = parseRestaurantInput(
+      await req.json()
+    );
 
     const { rows } = await pool.query(
       `INSERT INTO restaurants (name, cuisine, address, rating)
        VALUES ($1, $2, $3, $4)
        RETURNING ${RESTAURANT_COLUMNS}`,
-      [name, cuisine ?? null, address ?? null, rating ?? null]
+      [name, cuisine, address, rating]
     );
 
     return NextResponse.json(toRestaurant(rows[0]), { status: 201 });
